@@ -1,0 +1,21 @@
+{
+  "name": "autobrr-steam-wishlist",
+  "version": "1.0.0",
+  "description": "Workaround to get Steam wishlists working as an Autobrr list for filters",
+  "keywords": [
+    "autobrr",
+    "steam"
+  ],
+  "homepage": "https://github.com/cy1der/autobrr-steam-wishlist#readme",
+  "bugs": {
+    "url": "https://github.com/cy1der/autobrr-steam-wishlist/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/cy1der/autobrr-steam-wishlist.git"
+  },
+  "license": "MIT",
+  "author": "cy1der",
+  "type": "commonjs",
+  "main": "index.js"
+}
