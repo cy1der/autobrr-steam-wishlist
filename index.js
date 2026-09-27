@@ -78,7 +78,8 @@ const server = http.createServer(async (req, res) => {
   let appNames = [];
 
   const REQUEST_COUNT = wishlistIds.length;
-  const MAX_PARALLEL_REQUESTS = 20;
+  // Lowered to 5 to avoid hitting Steam store rate limits (HTTP 429)
+  const MAX_PARALLEL_REQUESTS = 5;
   const INTER_BATCH_DELAY_MS = 500;
 
   const BATCH_SIZE = Math.max(
@@ -99,20 +100,35 @@ const server = http.createServer(async (req, res) => {
     const results = await Promise.allSettled(
       batch.map(async (id) => {
         if (DEBUG) {
-          console.log(`[${new Date().toISOString()}] [DEBUG] Fetching: ${STORE_BASE_URL}/appdetails?appids=${id}`);
+          console.log(
+            `[${new Date().toISOString()}] [DEBUG] Fetching: ${STORE_BASE_URL}/appdetails?appids=${id}`,
+          );
         }
-        
+
         const response = await fetch(`${STORE_BASE_URL}/appdetails?appids=${id}`);
+        
+        if (!response.ok) {
+          if (DEBUG) {
+            console.log(
+              `[${new Date().toISOString()}] [DEBUG] HTTP error ${response.status} for id ${id}`,
+            );
+          }
+          return null;
+        }
+
         const data = await response.json();
 
         if (DEBUG) {
-          console.log(`[${new Date().toISOString()}] [DEBUG] Response for ${id}:`, JSON.stringify(data[id]));
+          console.log(
+            `[${new Date().toISOString()}] [DEBUG] Response for ${id}:`,
+            JSON.stringify(data[id]),
+          );
         }
 
-        if (data[id]?.success) {
+        if (data && data[id]?.success) {
           return normalizeAppName(data[id].data.name);
         }
-        
+
         return null;
       }),
     );
@@ -124,7 +140,7 @@ const server = http.createServer(async (req, res) => {
           appNames.push(result.value);
         } else {
           console.log(
-            `[${new Date().toISOString()}] App ID ${currentId} returned success: false from Steam API.`,
+            `[${new Date().toISOString()}] App ID ${currentId} returned success: false or empty response from Steam API.`,
           );
         }
       } else {
@@ -154,4 +170,3 @@ server.listen(PORT, () => {
     `[${new Date().toISOString()}] Server running on http://localhost:${PORT}`,
   );
 });
-
