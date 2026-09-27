@@ -116,7 +116,7 @@ const server = http.createServer(async (req, res) => {
     `[${new Date().toISOString()}] Found ${wishlistIds.length} items in wishlist`,
   );
   
-  // Get the complete Steam app map first (bypasses store-page blocks)
+  // Get the complete Steam app map first
   const appMap = await getSteamAppMap();
   let appNames = [];
 
@@ -127,7 +127,7 @@ const server = http.createServer(async (req, res) => {
 
     let appName = null;
 
-    // 1. Check global app list cache first (most reliable for fetching titles like 3079210)
+    // 1. Check global app list cache FIRST (bypasses store-page blocks and age gates)
     if (appMap.has(id)) {
       appName = normalizeAppName(appMap.get(id));
       if (DEBUG) {
@@ -135,7 +135,7 @@ const server = http.createServer(async (req, res) => {
       }
     }
 
-    // 2. Fall back to Store API if not found in global cache
+    // 2. Fall back to Store API ONLY if it's not found in the global cache
     if (!appName) {
       try {
         const apiKeyParam = STEAM_API_KEY ? `&key=${STEAM_API_KEY}` : "";
