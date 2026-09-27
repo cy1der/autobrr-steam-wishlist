@@ -75,47 +75,28 @@ const server = http.createServer(async (req, res) => {
   console.log(
     `[${new Date().toISOString()}] Found ${wishlistIds.length} items in wishlist`,
   );
+  
   let appNames = [];
 
-  const REQUEST_COUNT = wishlistIds.length;
-  // Lowered to 5 to avoid hitting Steam store rate limits (HTTP 429)
-  const MAX_PARALLEL_REQUESTS = 5;
-  const INTER_BATCH_DELAY_MS = 500;
+  // Fetch items sequentially with a small delay to avoid Steam rate limits / dropped connections
+  for (let i = 0; i < wishlistIds.length; i++) {
+    const id = wishlistIds[i];
+    console.log(`[${new Date().toISOString()}] Fetching app details for id: ${id}`);
 
-  const BATCH_SIZE = Math.max(
-    1,
-    Math.min(MAX_PARALLEL_REQUESTS, REQUEST_COUNT),
-  );
-  const DELAY_MS = REQUEST_COUNT > BATCH_SIZE ? INTER_BATCH_DELAY_MS : 0;
-  console.log(
-    `[${new Date().toISOString()}] BATCH_SIZE: ${BATCH_SIZE}, DELAY_MS: ${DELAY_MS}`,
-  );
+    try {
+      if (DEBUG) {
+        console.log(
+          `[${new Date().toISOString()}] [DEBUG] Fetching: ${STORE_BASE_URL}/appdetails?appids=${id}`,
+        );
+      }
 
-  for (let i = 0; i < wishlistIds.length; i += BATCH_SIZE) {
-    const batch = wishlistIds.slice(i, i + BATCH_SIZE);
-    console.log(
-      `[${new Date().toISOString()}] Processing batch ${Math.floor(i / BATCH_SIZE) + 1}: ${batch.join(", ")}`,
-    );
-
-    const results = await Promise.allSettled(
-      batch.map(async (id) => {
-        if (DEBUG) {
-          console.log(
-            `[${new Date().toISOString()}] [DEBUG] Fetching: ${STORE_BASE_URL}/appdetails?appids=${id}`,
-          );
-        }
-
-        const response = await fetch(`${STORE_BASE_URL}/appdetails?appids=${id}`);
-        
-        if (!response.ok) {
-          if (DEBUG) {
-            console.log(
-              `[${new Date().toISOString()}] [DEBUG] HTTP error ${response.status} for id ${id}`,
-            );
-          }
-          return null;
-        }
-
+      const response = await fetch(`${STORE_BASE_URL}/appdetails?appids=${id}`);
+      
+      if (!response.ok) {
+        console.log(
+          `[${new Date().toISOString()}] [DEBUG] HTTP error ${response.status} for id ${id}`,
+        );
+      } else {
         const data = await response.json();
 
         if (DEBUG) {
@@ -126,35 +107,26 @@ const server = http.createServer(async (req, res) => {
         }
 
         if (data && data[id]?.success) {
-          return normalizeAppName(data[id].data.name);
-        }
-
-        return null;
-      }),
-    );
-
-    results.forEach((result, index) => {
-      const currentId = batch[index];
-      if (result.status === "fulfilled") {
-        if (result.value) {
-          appNames.push(result.value);
+          const appName = normalizeAppName(data[id].data.name);
+          appNames.push(appName);
+          console.log(
+            `[${new Date().toISOString()}] Got name for id ${id}: ${appName}`,
+          );
         } else {
           console.log(
-            `[${new Date().toISOString()}] App ID ${currentId} returned success: false or empty response from Steam API.`,
+            `[${new Date().toISOString()}] App ID ${id} returned success: false or empty response from Steam API.`,
           );
         }
-      } else {
-        console.log(
-          `[${new Date().toISOString()}] Network request failed for ID ${currentId}: ${result.reason}`,
-        );
       }
-    });
-
-    if (DELAY_MS > 0 && i + BATCH_SIZE < wishlistIds.length) {
+    } catch (error) {
       console.log(
-        `[${new Date().toISOString()}] Waiting ${DELAY_MS}ms before next batch`,
+        `[${new Date().toISOString()}] Network request failed for ID ${id}: ${error.message}`,
       );
-      await new Promise((resolve) => setTimeout(resolve, DELAY_MS));
+    }
+
+    // 150ms delay between each individual request to keep Steam happy
+    if (i < wishlistIds.length - 1) {
+      await new Promise((resolve) => setTimeout(resolve, 150));
     }
   }
 
