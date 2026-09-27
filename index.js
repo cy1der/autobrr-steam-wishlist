@@ -5,6 +5,42 @@ const API_BASE_URL = "https://api.steampowered.com";
 const STORE_BASE_URL = "https://store.steampowered.com/api";
 const DEBUG = true; // Set to true to print raw API responses for troubleshooting
 
+// Cache for Steam app list to avoid downloading it on every single request
+let appListCache = {
+  timestamp: 0,
+  map: new Map()
+};
+const CACHE_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
+
+async function getSteamAppMap() {
+  const now = Date.now();
+  if (appListCache.map.size > 0 && (now - appListCache.timestamp) < CACHE_TTL_MS) {
+    return appListCache.map;
+  }
+
+  console.log(`[${new Date().toISOString()}] Fetching global Steam app list cache...`);
+  try {
+    const res = await fetch(`${API_BASE_URL}/ISteamApps/GetAppList/v2/`);
+    if (res.ok) {
+      const data = await res.json();
+      const apps = data?.applist?.apps || [];
+      const newMap = new Map();
+      for (const app of apps) {
+        newMap.set(String(app.appid), app.name);
+      }
+      appListCache = {
+        timestamp: now,
+        map: newMap
+      };
+      console.log(`[${new Date().toISOString()}] Steam app list cached successfully (${newMap.size} apps).`);
+      return newMap;
+    }
+  } catch (err) {
+    console.log(`[${new Date().toISOString()}] Failed to fetch global app list: ${err.message}`);
+  }
+  return appListCache.map;
+}
+
 function normalizeAppName(name) {
   if (typeof name !== "string") {
     return "";
@@ -70,77 +106,68 @@ const server = http.createServer(async (req, res) => {
 
   const wishlistData = await wishlistResponse.json();
   const wishlistIds =
-    wishlistData?.response?.items?.slice(0, 200).map((item) => item.appid) ||
+    wishlistData?.response?.items?.slice(0, 200).map((item) => String(item.appid)) ||
     [];
   console.log(
     `[${new Date().toISOString()}] Found ${wishlistIds.length} items in wishlist`,
   );
   
+  // Get the complete Steam app map for instant lookup
+  const appMap = await getSteamAppMap();
   let appNames = [];
 
-  // Fetch items sequentially with a small delay to avoid Steam rate limits / dropped connections
+  // Fetch items sequentially with a small delay to handle any fallback store requests safely
   for (let i = 0; i < wishlistIds.length; i++) {
     const id = wishlistIds[i];
-    console.log(`[${new Date().toISOString()}] Fetching app details for id: ${id}`);
+    console.log(`[${new Date().toISOString()}] Resolving app name for id: ${id}`);
 
-    try {
+    let appName = null;
+
+    // 1. Try checking the global Steam App List first (bypasses age gates & store blocks entirely)
+    if (appMap.has(id)) {
+      appName = normalizeAppName(appMap.get(id));
       if (DEBUG) {
-        console.log(
-          `[${new Date().toISOString()}] [DEBUG] Fetching: ${STORE_BASE_URL}/appdetails?appids=${id}&cc=US&l=en&agecheck=1`,
-        );
+        console.log(`[${new Date().toISOString()}] [DEBUG] Found in global app list: ${appName}`);
       }
+    }
 
-      let appName = null;
-      const response = await fetch(`${STORE_BASE_URL}/appdetails?appids=${id}&cc=US&l=en&agecheck=1`);
-      
-      if (response.ok) {
-        const data = await response.json();
+    // 2. If not found or empty, fall back to the store API
+    if (!appName) {
+      try {
         if (DEBUG) {
           console.log(
-            `[${new Date().toISOString()}] [DEBUG] Response for ${id}:`,
-            JSON.stringify(data[id]),
+            `[${new Date().toISOString()}] [DEBUG] Fetching store API fallback: ${STORE_BASE_URL}/appdetails?appids=${id}&cc=US&l=en&agecheck=1`,
           );
         }
 
-        if (data && data[id]?.success) {
-          appName = normalizeAppName(data[id].data.name);
-        }
-      }
-
-      // Fallback mechanism if standard store API returns undefined/failure
-      if (!appName) {
-        if (DEBUG) {
-          console.log(`[${new Date().toISOString()}] [DEBUG] Trying fallback community endpoint for id: ${id}`);
-        }
-        const fallbackRes = await fetch(`https://steamcommunity.com/app/${id}/json`);
-        if (fallbackRes.ok) {
-          const fallbackData = await fallbackRes.json();
-          if (fallbackData && fallbackData.name) {
-            appName = normalizeAppName(fallbackData.name);
+        const response = await fetch(`${STORE_BASE_URL}/appdetails?appids=${id}&cc=US&l=en&agecheck=1`);
+        if (response.ok) {
+          const data = await response.json();
+          if (data && data[id]?.success) {
+            appName = normalizeAppName(data[id].data.name);
           }
         }
-      }
-
-      if (appName) {
-        appNames.push(appName);
+      } catch (error) {
         console.log(
-          `[${new Date().toISOString()}] Got name for id ${id}: ${appName}`,
-        );
-      } else {
-        console.log(
-          `[${new Date().toISOString()}] App ID ${id} could not be resolved from Steam APIs.`,
+          `[${new Date().toISOString()}] Store API fallback failed for ID ${id}: ${error.message}`,
         );
       }
+    }
 
-    } catch (error) {
+    if (appName) {
+      appNames.push(appName);
       console.log(
-        `[${new Date().toISOString()}] Network request failed for ID ${id}: ${error.message}`,
+        `[${new Date().toISOString()}] Got name for id ${id}: ${appName}`,
+      );
+    } else {
+      console.log(
+        `[${new Date().toISOString()}] App ID ${id} could not be resolved.`,
       );
     }
 
-    // 150ms delay between each individual request to keep Steam happy
+    // Small delay between iterations if falling back to network calls
     if (i < wishlistIds.length - 1) {
-      await new Promise((resolve) => setTimeout(resolve, 150));
+      await new Promise((resolve) => setTimeout(resolve, 100));
     }
   }
 
