@@ -6,42 +6,11 @@ const API_BASE_URL = "https://api.steampowered.com";
 const STORE_BASE_URL = "https://store.steampowered.com/api";
 const DEBUG = true; // Set to true to print raw API responses for troubleshooting
 
-// Cache for Steam app list to avoid downloading it on every single request
-let appListCache = {
-  timestamp: 0,
-  map: new Map()
+// Standard browser headers to prevent Steam from blocking requests
+const BROWSER_HEADERS = {
+  "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+  "Accept-Language": "en-US,en;q=0.9"
 };
-const CACHE_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
-
-async function getSteamAppMap() {
-  const now = Date.now();
-  if (appListCache.map.size > 0 && (now - appListCache.timestamp) < CACHE_TTL_MS) {
-    return appListCache.map;
-  }
-
-  console.log(`[${new Date().toISOString()}] Fetching global Steam app list cache...`);
-  try {
-    const keyParam = STEAM_API_KEY ? `&key=${STEAM_API_KEY}` : "";
-    const res = await fetch(`${API_BASE_URL}/ISteamApps/GetAppList/v2/?${keyParam}`);
-    if (res.ok) {
-      const data = await res.json();
-      const apps = data?.applist?.apps || [];
-      const newMap = new Map();
-      for (const app of apps) {
-        newMap.set(String(app.appid), app.name);
-      }
-      appListCache = {
-        timestamp: now,
-        map: newMap
-      };
-      console.log(`[${new Date().toISOString()}] Steam app list cached successfully (${newMap.size} apps).`);
-      return newMap;
-    }
-  } catch (err) {
-    console.log(`[${new Date().toISOString()}] Failed to fetch global app list: ${err.message}`);
-  }
-  return appListCache.map;
-}
 
 function normalizeAppName(name) {
   if (typeof name !== "string") {
@@ -97,6 +66,7 @@ const server = http.createServer(async (req, res) => {
   const wishlistKeyParam = STEAM_API_KEY ? `&key=${STEAM_API_KEY}` : "";
   const wishlistResponse = await fetch(
     `${API_BASE_URL}/IWishlistService/GetWishlist/v1?steamid=${userid}${wishlistKeyParam}`,
+    { headers: BROWSER_HEADERS }
   );
 
   if (!wishlistResponse.ok) {
@@ -116,47 +86,37 @@ const server = http.createServer(async (req, res) => {
     `[${new Date().toISOString()}] Found ${wishlistIds.length} items in wishlist`,
   );
   
-  // Get the complete Steam app map first
-  const appMap = await getSteamAppMap();
   let appNames = [];
 
-  // Fetch items sequentially
+  // Fetch items sequentially using the store API with browser headers and age-check bypasses
   for (let i = 0; i < wishlistIds.length; i++) {
     const id = wishlistIds[i];
     console.log(`[${new Date().toISOString()}] Resolving app name for id: ${id}`);
 
     let appName = null;
 
-    // 1. Check global app list cache FIRST (bypasses store-page blocks and age gates)
-    if (appMap.has(id)) {
-      appName = normalizeAppName(appMap.get(id));
+    try {
+      const apiKeyParam = STEAM_API_KEY ? `&key=${STEAM_API_KEY}` : "";
+      const storeUrl = `${STORE_BASE_URL}/appdetails?appids=${id}&cc=US&l=en&agecheck=1${apiKeyParam}`;
+      
       if (DEBUG) {
-        console.log(`[${new Date().toISOString()}] [DEBUG] Found in global app list: ${appName}`);
+        console.log(`[${new Date().toISOString()}] [DEBUG] Fetching store API: ${storeUrl}`);
       }
-    }
 
-    // 2. Fall back to Store API ONLY if it's not found in the global cache
-    if (!appName) {
-      try {
-        const apiKeyParam = STEAM_API_KEY ? `&key=${STEAM_API_KEY}` : "";
-        const storeUrl = `${STORE_BASE_URL}/appdetails?appids=${id}&cc=US&l=en&agecheck=1${apiKeyParam}`;
-        
+      const response = await fetch(storeUrl, { headers: BROWSER_HEADERS });
+      if (response.ok) {
+        const data = await response.json();
         if (DEBUG) {
-          console.log(`[${new Date().toISOString()}] [DEBUG] Fetching store API fallback: ${storeUrl}`);
+          console.log(`[${new Date().toISOString()}] [DEBUG] Response for ${id}:`, JSON.stringify(data[id]));
         }
-
-        const response = await fetch(storeUrl);
-        if (response.ok) {
-          const data = await response.json();
-          if (data && data[id]?.success) {
-            appName = normalizeAppName(data[id].data.name);
-          }
+        if (data && data[id]?.success) {
+          appName = normalizeAppName(data[id].data.name);
         }
-      } catch (error) {
-        console.log(
-          `[${new Date().toISOString()}] Store API request failed for ID ${id}: ${error.message}`,
-        );
       }
+    } catch (error) {
+      console.log(
+        `[${new Date().toISOString()}] Store API request failed for ID ${id}: ${error.message}`,
+      );
     }
 
     if (appName) {
@@ -170,7 +130,7 @@ const server = http.createServer(async (req, res) => {
       );
     }
 
-    // Small delay between iterations
+    // Small delay between iterations to respect rate limits
     if (i < wishlistIds.length - 1) {
       await new Promise((resolve) => setTimeout(resolve, 150));
     }
