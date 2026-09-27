@@ -6,7 +6,6 @@ const API_BASE_URL = "https://api.steampowered.com";
 const STORE_BASE_URL = "https://store.steampowered.com/api";
 const DEBUG = true; // Set to true to print raw API responses for troubleshooting
 
-// Standard browser headers to prevent Steam from blocking requests
 const BROWSER_HEADERS = {
   "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
   "Accept-Language": "en-US,en;q=0.9"
@@ -88,7 +87,7 @@ const server = http.createServer(async (req, res) => {
   
   let appNames = [];
 
-  // Fetch items sequentially using the store API with browser headers and age-check bypasses
+  // Fetch items sequentially
   for (let i = 0; i < wishlistIds.length; i++) {
     const id = wishlistIds[i];
     console.log(`[${new Date().toISOString()}] Resolving app name for id: ${id}`);
@@ -119,6 +118,30 @@ const server = http.createServer(async (req, res) => {
       );
     }
 
+    // Secondary fallback: if appdetails fails due to backend flags, query Steam's storefront search / metadata page
+    if (!appName) {
+      try {
+        const fallbackUrl = `https://store.steampowered.com/app/${id}?cc=US&l=en&agecheck=1`;
+        if (DEBUG) {
+          console.log(`[${new Date().toISOString()}] [DEBUG] Fetching HTML fallback: ${fallbackUrl}`);
+        }
+        const htmlRes = await fetch(fallbackUrl, { headers: BROWSER_HEADERS });
+        if (htmlRes.ok) {
+          const htmlText = await htmlRes.text();
+          // Extract game title directly from the store page HTML title tag (<title>Game Name on Steam</title>)
+          const match = htmlText.match(/<title>\s*(?:18\+.*?-\s*)?([^<]+?)\s*(?:on Steam)?<\/title>/i);
+          if (match && match[1]) {
+            let extractedName = match[1].replace("on Steam", "").trim();
+            if (extractedName && !extractedName.toLowerCase().includes("welcome to steam")) {
+              appName = normalizeAppName(extractedName);
+            }
+          }
+        }
+      } catch (err) {
+        console.log(`[${new Date().toISOString()}] HTML fallback failed for ID ${id}: ${err.message}`);
+      }
+    }
+
     if (appName) {
       appNames.push(appName);
       console.log(
@@ -130,7 +153,7 @@ const server = http.createServer(async (req, res) => {
       );
     }
 
-    // Small delay between iterations to respect rate limits
+    // Small delay between iterations
     if (i < wishlistIds.length - 1) {
       await new Promise((resolve) => setTimeout(resolve, 150));
     }
