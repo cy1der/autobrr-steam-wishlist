@@ -86,12 +86,12 @@ const server = http.createServer(async (req, res) => {
     try {
       if (DEBUG) {
         console.log(
-          `[${new Date().toISOString()}] [DEBUG] Fetching: ${STORE_BASE_URL}/appdetails?appids=${id}&cc=US&l=en`,
+          `[${new Date().toISOString()}] [DEBUG] Fetching: ${STORE_BASE_URL}/appdetails?appids=${id}&cc=US&l=en&agecheck=1`,
         );
       }
 
-      // Added &cc=US&l=en to bypass region/mature empty responses
-      const response = await fetch(`${STORE_BASE_URL}/appdetails?appids=${id}&cc=US&l=en`);
+      // Added &agecheck=1 to bypass mature content age gates
+      const response = await fetch(`${STORE_BASE_URL}/appdetails?appids=${id}&cc=US&l=en&agecheck=1`);
       
       if (!response.ok) {
         console.log(
