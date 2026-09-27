@@ -3,6 +3,7 @@ const http = require("http");
 const PORT = process.env.PORT || 3000;
 const API_BASE_URL = "https://api.steampowered.com";
 const STORE_BASE_URL = "https://store.steampowered.com/api";
+const DEBUG = true; // Set to true to print raw API responses for troubleshooting
 
 function normalizeAppName(name) {
   if (typeof name !== "string") {
@@ -21,11 +22,19 @@ function normalizeAppName(name) {
     .normalize("NFC")
     .trim();
 
-  return repaired.includes("�") ? normalized : repaired;
+  return repaired.includes("") ? normalized : repaired;
 }
 
 const server = http.createServer(async (req, res) => {
   const requestPath = req.url.split("?")[0];
+
+  // Handle favicon or non-text requests cleanly
+  if (requestPath === "/favicon.ico") {
+    res.writeHead(404);
+    res.end();
+    return;
+  }
+
   const useridMatch = requestPath.match(/^\/(\d+)\.txt$/);
   const userid = useridMatch?.[1] || "";
   console.log(
@@ -89,28 +98,38 @@ const server = http.createServer(async (req, res) => {
 
     const results = await Promise.allSettled(
       batch.map(async (id) => {
-        console.log(
-          `[${new Date().toISOString()}] Fetching app details for id: ${id}`,
-        );
-        const res = await fetch(`${STORE_BASE_URL}/appdetails?appids=${id}`);
-        const data = await res.json();
+        if (DEBUG) {
+          console.log(`[${new Date().toISOString()}] [DEBUG] Fetching: ${STORE_BASE_URL}/appdetails?appids=${id}`);
+        }
+        
+        const response = await fetch(`${STORE_BASE_URL}/appdetails?appids=${id}`);
+        const data = await response.json();
+
+        if (DEBUG) {
+          console.log(`[${new Date().toISOString()}] [DEBUG] Response for ${id}:`, JSON.stringify(data[id]));
+        }
+
         if (data[id]?.success) {
-          console.log(
-            `[${new Date().toISOString()}] Got name for id ${id}: ${data[id].data.name}`,
-          );
           return normalizeAppName(data[id].data.name);
         }
-        console.log(`[${new Date().toISOString()}] No success for id ${id}`);
+        
         return null;
       }),
     );
 
-    results.forEach((result) => {
-      if (result.status === "fulfilled" && result.value) {
-        appNames.push(result.value);
+    results.forEach((result, index) => {
+      const currentId = batch[index];
+      if (result.status === "fulfilled") {
+        if (result.value) {
+          appNames.push(result.value);
+        } else {
+          console.log(
+            `[${new Date().toISOString()}] App ID ${currentId} returned success: false from Steam API.`,
+          );
+        }
       } else {
         console.log(
-          `[${new Date().toISOString()}] Request failed: ${result.reason}`,
+          `[${new Date().toISOString()}] Network request failed for ID ${currentId}: ${result.reason}`,
         );
       }
     });
