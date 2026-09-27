@@ -90,16 +90,11 @@ const server = http.createServer(async (req, res) => {
         );
       }
 
-      // Added &agecheck=1 to bypass mature content age gates
+      let appName = null;
       const response = await fetch(`${STORE_BASE_URL}/appdetails?appids=${id}&cc=US&l=en&agecheck=1`);
       
-      if (!response.ok) {
-        console.log(
-          `[${new Date().toISOString()}] [DEBUG] HTTP error ${response.status} for id ${id}`,
-        );
-      } else {
+      if (response.ok) {
         const data = await response.json();
-
         if (DEBUG) {
           console.log(
             `[${new Date().toISOString()}] [DEBUG] Response for ${id}:`,
@@ -108,17 +103,35 @@ const server = http.createServer(async (req, res) => {
         }
 
         if (data && data[id]?.success) {
-          const appName = normalizeAppName(data[id].data.name);
-          appNames.push(appName);
-          console.log(
-            `[${new Date().toISOString()}] Got name for id ${id}: ${appName}`,
-          );
-        } else {
-          console.log(
-            `[${new Date().toISOString()}] App ID ${id} returned success: false or empty response from Steam API.`,
-          );
+          appName = normalizeAppName(data[id].data.name);
         }
       }
+
+      // Fallback mechanism if standard store API returns undefined/failure
+      if (!appName) {
+        if (DEBUG) {
+          console.log(`[${new Date().toISOString()}] [DEBUG] Trying fallback community endpoint for id: ${id}`);
+        }
+        const fallbackRes = await fetch(`https://steamcommunity.com/app/${id}/json`);
+        if (fallbackRes.ok) {
+          const fallbackData = await fallbackRes.json();
+          if (fallbackData && fallbackData.name) {
+            appName = normalizeAppName(fallbackData.name);
+          }
+        }
+      }
+
+      if (appName) {
+        appNames.push(appName);
+        console.log(
+          `[${new Date().toISOString()}] Got name for id ${id}: ${appName}`,
+        );
+      } else {
+        console.log(
+          `[${new Date().toISOString()}] App ID ${id} could not be resolved from Steam APIs.`,
+        );
+      }
+
     } catch (error) {
       console.log(
         `[${new Date().toISOString()}] Network request failed for ID ${id}: ${error.message}`,
