@@ -5,7 +5,8 @@ const STEAM_API_KEY = process.env.STEAM_API_KEY || "";
 const COUNTRY_CODE = process.env.COUNTRY_CODE || "US";
 const VERBOSE = process.env.VERBOSE === "1" || process.env.VERBOSE === "true";
 const API_BASE_URL = "https://api.steampowered.com";
-const STORE_BASE_URL = "https://store.steampowered.com/api";
+const STORE_API_URL = "https://store.steampowered.com/api";
+const STORE_WEB_URL = "https://store.steampowered.com/app";
 
 function debug(message, { userid, appid } = {}) {
   if (VERBOSE) {
@@ -93,8 +94,7 @@ const server = http.createServer(async (req, res) => {
     let appName = null;
 
     try {
-      const apiKeyParam = STEAM_API_KEY ? `&key=${STEAM_API_KEY}` : "";
-      const storeUrl = `${STORE_BASE_URL}/appdetails?appids=${id}&cc=${COUNTRY_CODE}&l=en&agecheck=1${apiKeyParam}`;
+      const storeUrl = `${STORE_API_URL}/appdetails?appids=${id}&cc=${COUNTRY_CODE}&l=en&agecheck=1`;
 
       const response = await fetch(storeUrl, { headers: BROWSER_HEADERS });
       if (response.ok) {
@@ -110,7 +110,7 @@ const server = http.createServer(async (req, res) => {
     if (!appName) {
       debug("Falling back to HTML scrape", { userid, appid: id });
       try {
-        const fallbackUrl = `https://store.steampowered.com/app/${id}?cc=${COUNTRY_CODE}&l=en&agecheck=1`;
+        const fallbackUrl = `${STORE_WEB_URL}/${id}?cc=${COUNTRY_CODE}&l=en&agecheck=1`;
         const htmlRes = await fetch(fallbackUrl, { headers: BROWSER_HEADERS });
         if (htmlRes.ok) {
           const htmlText = await htmlRes.text();
