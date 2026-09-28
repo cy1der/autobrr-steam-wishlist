@@ -1,9 +1,17 @@
 name: Build and Publish Container
 
 on:
+  push:
+    branches:
+      - '**'
+    tags:
+      - '**'
+  pull_request:
+    branches:
+      - '**'
   release:
-    types:
-      - published
+    types: [published, prereleased, created, released]
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -33,7 +41,7 @@ jobs:
         with:
           images: ghcr.io/${{ github.repository }}
           tags: |
-            type=raw,value=latest
+            type=raw,value=latest,enable=${{ github.event_name == 'release' && github.event.action == 'released' }}
             type=ref,event=tag
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}

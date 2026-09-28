@@ -1,8 +1,26 @@
 const http = require("http");
 
 const PORT = process.env.PORT || 3000;
+const STEAM_API_KEY = process.env.STEAM_API_KEY || "";
+const COUNTRY_CODE = process.env.COUNTRY_CODE || "US";
+const VERBOSE = process.env.VERBOSE === "1" || process.env.VERBOSE === "true";
 const API_BASE_URL = "https://api.steampowered.com";
-const STORE_BASE_URL = "https://store.steampowered.com/api";
+const STORE_API_URL = "https://store.steampowered.com/api";
+const STORE_WEB_URL = "https://store.steampowered.com/app";
+
+function debug(message, { userid, appid } = {}) {
+  if (VERBOSE) {
+    const tags = [userid && `[user:${userid}]`, appid && `[app:${appid}]`]
+      .filter(Boolean)
+      .join(" ");
+    console.log(["[debug]", tags, message].filter(Boolean).join(" "));
+  }
+}
+
+const BROWSER_HEADERS = {
+  "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+  "Accept-Language": "en-US,en;q=0.9"
+};
 
 function normalizeAppName(name) {
   if (typeof name !== "string") {
@@ -21,39 +39,42 @@ function normalizeAppName(name) {
     .normalize("NFC")
     .trim();
 
-  return repaired.includes("�") ? normalized : repaired;
+  return repaired.includes("") ? normalized : repaired;
 }
 
 const server = http.createServer(async (req, res) => {
   const requestPath = req.url.split("?")[0];
+
+  if (requestPath === "/favicon.ico") {
+    res.writeHead(404);
+    res.end();
+    return;
+  }
+
   const useridMatch = requestPath.match(/^\/(\d+)\.txt$/);
   const userid = useridMatch?.[1] || "";
-  console.log(
-    `[${new Date().toISOString()}] Request path: ${requestPath}, userid: ${userid}`,
-  );
 
   if (
     !useridMatch ||
     userid.length > 20 ||
     BigInt(userid) > BigInt("18446744073709551615")
   ) {
-    console.log(`[${new Date().toISOString()}] Invalid userid format`);
+    debug(`Request rejected: ${requestPath}`, { userid });
     res.writeHead(400);
     res.end();
     return;
   }
 
-  console.log(
-    `[${new Date().toISOString()}] Fetching wishlist from ${API_BASE_URL}`,
-  );
+  debug(`Request received: ${requestPath}`, { userid });
+
+  const wishlistKeyParam = STEAM_API_KEY ? `&key=${STEAM_API_KEY}` : "";
   const wishlistResponse = await fetch(
-    `${API_BASE_URL}/IWishlistService/GetWishlist/v1?steamid=${userid}`,
+    `${API_BASE_URL}/IWishlistService/GetWishlist/v1?steamid=${userid}${wishlistKeyParam}`,
+    { headers: BROWSER_HEADERS }
   );
 
   if (!wishlistResponse.ok) {
-    console.log(
-      `[${new Date().toISOString()}] Wishlist API error: ${wishlistResponse.status}`,
-    );
+    debug(`Wishlist fetch failed: ${wishlistResponse.status}`, { userid });
     res.writeHead(500);
     res.end();
     return;
@@ -61,77 +82,68 @@ const server = http.createServer(async (req, res) => {
 
   const wishlistData = await wishlistResponse.json();
   const wishlistIds =
-    wishlistData?.response?.items?.slice(0, 200).map((item) => item.appid) ||
+    wishlistData?.response?.items?.slice(0, 200).map((item) => String(item.appid)) ||
     [];
-  console.log(
-    `[${new Date().toISOString()}] Found ${wishlistIds.length} items in wishlist`,
-  );
+
+  debug(`Wishlist has ${wishlistIds.length} item${wishlistIds.length === 1 ? "" : "s"}`, { userid });
+
   let appNames = [];
 
-  const REQUEST_COUNT = wishlistIds.length;
-  const MAX_PARALLEL_REQUESTS = 20;
-  const INTER_BATCH_DELAY_MS = 500;
+  for (let i = 0; i < wishlistIds.length; i++) {
+    const id = wishlistIds[i];
+    let appName = null;
 
-  const BATCH_SIZE = Math.max(
-    1,
-    Math.min(MAX_PARALLEL_REQUESTS, REQUEST_COUNT),
-  );
-  const DELAY_MS = REQUEST_COUNT > BATCH_SIZE ? INTER_BATCH_DELAY_MS : 0;
-  console.log(
-    `[${new Date().toISOString()}] BATCH_SIZE: ${BATCH_SIZE}, DELAY_MS: ${DELAY_MS}`,
-  );
+    try {
+      const storeUrl = `${STORE_API_URL}/appdetails?appids=${id}&cc=${COUNTRY_CODE}&l=en&agecheck=1`;
 
-  for (let i = 0; i < wishlistIds.length; i += BATCH_SIZE) {
-    const batch = wishlistIds.slice(i, i + BATCH_SIZE);
-    console.log(
-      `[${new Date().toISOString()}] Processing batch ${Math.floor(i / BATCH_SIZE) + 1}: ${batch.join(", ")}`,
-    );
-
-    const results = await Promise.allSettled(
-      batch.map(async (id) => {
-        console.log(
-          `[${new Date().toISOString()}] Fetching app details for id: ${id}`,
-        );
-        const res = await fetch(`${STORE_BASE_URL}/appdetails?appids=${id}`);
-        const data = await res.json();
-        if (data[id]?.success) {
-          console.log(
-            `[${new Date().toISOString()}] Got name for id ${id}: ${data[id].data.name}`,
-          );
-          return normalizeAppName(data[id].data.name);
+      const response = await fetch(storeUrl, { headers: BROWSER_HEADERS });
+      if (response.ok) {
+        const data = await response.json();
+        if (data && data[id]?.success) {
+          appName = normalizeAppName(data[id].data.name);
         }
-        console.log(`[${new Date().toISOString()}] No success for id ${id}`);
-        return null;
-      }),
-    );
-
-    results.forEach((result) => {
-      if (result.status === "fulfilled" && result.value) {
-        appNames.push(result.value);
-      } else {
-        console.log(
-          `[${new Date().toISOString()}] Request failed: ${result.reason}`,
-        );
       }
-    });
+    } catch (error) {
+      debug(`App details request failed: ${error.message}`, { userid, appid: id });
+    }
 
-    if (DELAY_MS > 0 && i + BATCH_SIZE < wishlistIds.length) {
-      console.log(
-        `[${new Date().toISOString()}] Waiting ${DELAY_MS}ms before next batch`,
-      );
-      await new Promise((resolve) => setTimeout(resolve, DELAY_MS));
+    if (!appName) {
+      debug("Falling back to HTML scrape", { userid, appid: id });
+      try {
+        const fallbackUrl = `${STORE_WEB_URL}/${id}?cc=${COUNTRY_CODE}&l=en&agecheck=1`;
+        const htmlRes = await fetch(fallbackUrl, { headers: BROWSER_HEADERS });
+        if (htmlRes.ok) {
+          const htmlText = await htmlRes.text();
+          const match = htmlText.match(/<title>\s*(?:18\+.*?-\s*)?([^<]+?)\s*(?:on Steam)?<\/title>/i);
+          if (match && match[1]) {
+            let extractedName = match[1].replace("on Steam", "").trim();
+            if (extractedName && !extractedName.toLowerCase().includes("welcome to steam")) {
+              appName = normalizeAppName(extractedName);
+            }
+          }
+        }
+      } catch (err) {
+        debug(`HTML scrape failed: ${err.message}`, { userid, appid: id });
+      }
+    }
+
+    if (appName) {
+      appNames.push(appName);
+    } else {
+      debug("Could not resolve name", { userid, appid: id });
+    }
+
+    if (i < wishlistIds.length - 1) {
+      await new Promise((resolve) => setTimeout(resolve, 150));
     }
   }
 
-  console.log(
-    `[${new Date().toISOString()}] Sending response with ${appNames.length} app names`,
-  );
+  debug(`Resolved ${appNames.length}/${wishlistIds.length} app names`, { userid });
+
   res.writeHead(200, { "Content-Type": "text/plain; charset=utf-8" });
   res.end(Buffer.from(appNames.join("\n"), "utf8"));
 });
 
 server.listen(PORT, () => {
-  console.log(
-    `[${new Date().toISOString()}] Server running on http://localhost:${PORT}`,
-  );
+  console.log(`Server running on http://localhost:${PORT}`);
 });
