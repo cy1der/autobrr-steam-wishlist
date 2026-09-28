@@ -10,7 +10,7 @@ on:
     branches:
       - '**'
   release:
-    types: [published, prereleased, created]
+    types: [published, prereleased, created, released]
   workflow_dispatch:
 
 permissions:
@@ -41,7 +41,7 @@ jobs:
         with:
           images: ghcr.io/${{ github.repository }}
           tags: |
-            type=raw,value=latest
+            type=raw,value=latest,enable=${{ github.event_name == 'release' && github.event.action == 'released' }}
             type=ref,event=tag
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
