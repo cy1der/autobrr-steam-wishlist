@@ -31,6 +31,7 @@ Take:
 
 - `BASE_URL` is where you deployed the web server, I will use `http://autobrr-steam-wishlist:3000` as an example
 - `STEAMID` is the `steamID64` in step 1
+- `STEAM+_API_KEY` is the API key you can generate at https://steamcommunity.com/dev/apikey
 
 1. Get your `steamID64` from [STEAMID I/O](https://steamid.io) or from the URL of your profile
 2. In the "Add list" menu in Autobrr (Settings > Lists > Add new), select `Plaintext` as the type and enter `{BASE_URL}/{STEAMID}.txt`
