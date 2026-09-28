@@ -84,7 +84,7 @@ const server = http.createServer(async (req, res) => {
     wishlistData?.response?.items?.slice(0, 200).map((item) => String(item.appid)) ||
     [];
 
-  debug(`Wishlist has ${wishlistIds.length || "no"} item${wishlistIds.length >= 2 || !wishlistIds ? "s" : ""}`, { userid });
+  debug(`Wishlist has ${wishlistIds.length} item${wishlistIds.length === 1 ? "" : "s"}`, { userid });
 
   let appNames = [];
 
