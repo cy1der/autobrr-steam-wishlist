@@ -8,8 +8,10 @@ Simple workaround to get them working again, see [this issue](https://github.com
 
 1. Ensure you have [node.js](https://nodejs.org/) installed
 2. Clone this repository
-3. If you wish to change the port this runs on (default: 3000), rename `.env.example` to `.env` and change the port
-4. Command: `node --env-file=.env index.js`
+3. Rename `.env.example` to `.env`
+4. Set the port this runs on (default: 3000), change `PORT` in `.env` (optional)
+5. Set the Steam Web API Key (optional), change `STEAM_API_KEY` in `.env` (optional)
+6. Command: `node --env-file=.env index.js`
 
 ## Docker
 
@@ -20,7 +22,8 @@ services:
     container_name: autobrr-steam-wishlist
     restart: unless-stopped
     environment:
-      PORT: 3000
+      PORT: 3000 # Optional, omit this line if you would like
+      STEAM_API_KEY: yourApiKeyHere # Optional, omit this line if you do not wish to use an API key
     ports:
       - "3000:3000"
 ```
@@ -31,7 +34,6 @@ Take:
 
 - `BASE_URL` is where you deployed the web server, I will use `http://autobrr-steam-wishlist:3000` as an example
 - `STEAMID` is the `steamID64` in step 1
-- `STEAM+_API_KEY` is the API key you can generate at https://steamcommunity.com/dev/apikey
 
 1. Get your `steamID64` from [STEAMID I/O](https://steamid.io) or from the URL of your profile
 2. In the "Add list" menu in Autobrr (Settings > Lists > Add new), select `Plaintext` as the type and enter `{BASE_URL}/{STEAMID}.txt`
