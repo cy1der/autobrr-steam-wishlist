@@ -2,6 +2,7 @@ const http = require("http");
 
 const PORT = process.env.PORT || 3000;
 const STEAM_API_KEY = process.env.STEAM_API_KEY || "";
+const COUNTRY_CODE = process.env.COUNTRY_CODE || "US";
 const API_BASE_URL = "https://api.steampowered.com";
 const STORE_BASE_URL = "https://store.steampowered.com/api";
 
@@ -77,7 +78,7 @@ const server = http.createServer(async (req, res) => {
 
     try {
       const apiKeyParam = STEAM_API_KEY ? `&key=${STEAM_API_KEY}` : "";
-      const storeUrl = `${STORE_BASE_URL}/appdetails?appids=${id}&cc=US&l=en&agecheck=1${apiKeyParam}`;
+      const storeUrl = `${STORE_BASE_URL}/appdetails?appids=${id}&cc=${COUNTRY_CODE}&l=en&agecheck=1${apiKeyParam}`;
 
       const response = await fetch(storeUrl, { headers: BROWSER_HEADERS });
       if (response.ok) {
@@ -92,7 +93,7 @@ const server = http.createServer(async (req, res) => {
 
     if (!appName) {
       try {
-        const fallbackUrl = `https://store.steampowered.com/app/${id}?cc=US&l=en&agecheck=1`;
+        const fallbackUrl = `https://store.steampowered.com/app/${id}?cc=${COUNTRY_CODE}&l=en&agecheck=1`;
         const htmlRes = await fetch(fallbackUrl, { headers: BROWSER_HEADERS });
         if (htmlRes.ok) {
           const htmlText = await htmlRes.text();
