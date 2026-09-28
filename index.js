@@ -3,8 +3,18 @@ const http = require("http");
 const PORT = process.env.PORT || 3000;
 const STEAM_API_KEY = process.env.STEAM_API_KEY || "";
 const COUNTRY_CODE = process.env.COUNTRY_CODE || "US";
+const VERBOSE = process.env.VERBOSE === "1" || process.env.VERBOSE === "true";
 const API_BASE_URL = "https://api.steampowered.com";
 const STORE_BASE_URL = "https://store.steampowered.com/api";
+
+function debug(message, { userid, appid } = {}) {
+  if (VERBOSE) {
+    const tags = [userid && `[user:${userid}]`, appid && `[app:${appid}]`]
+      .filter(Boolean)
+      .join(" ");
+    console.log(["[debug]", tags, message].filter(Boolean).join(" "));
+  }
+}
 
 const BROWSER_HEADERS = {
   "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
@@ -48,10 +58,13 @@ const server = http.createServer(async (req, res) => {
     userid.length > 20 ||
     BigInt(userid) > BigInt("18446744073709551615")
   ) {
+    debug(`Request rejected: ${requestPath}`, { userid });
     res.writeHead(400);
     res.end();
     return;
   }
+
+  debug(`Request received: ${requestPath}`, { userid });
 
   const wishlistKeyParam = STEAM_API_KEY ? `&key=${STEAM_API_KEY}` : "";
   const wishlistResponse = await fetch(
@@ -60,6 +73,7 @@ const server = http.createServer(async (req, res) => {
   );
 
   if (!wishlistResponse.ok) {
+    debug(`Wishlist fetch failed: ${wishlistResponse.status}`, { userid });
     res.writeHead(500);
     res.end();
     return;
@@ -69,7 +83,9 @@ const server = http.createServer(async (req, res) => {
   const wishlistIds =
     wishlistData?.response?.items?.slice(0, 200).map((item) => String(item.appid)) ||
     [];
-  
+
+  debug(`Wishlist has ${wishlistIds.length || "no"} item${wishlistIds.length >= 2 || !wishlistIds ? "s" : ""}`, { userid });
+
   let appNames = [];
 
   for (let i = 0; i < wishlistIds.length; i++) {
@@ -88,10 +104,11 @@ const server = http.createServer(async (req, res) => {
         }
       }
     } catch (error) {
-      // Ignore network errors on individual items
+      debug(`App details request failed: ${error.message}`, { userid, appid: id });
     }
 
     if (!appName) {
+      debug("Falling back to HTML scrape", { userid, appid: id });
       try {
         const fallbackUrl = `https://store.steampowered.com/app/${id}?cc=${COUNTRY_CODE}&l=en&agecheck=1`;
         const htmlRes = await fetch(fallbackUrl, { headers: BROWSER_HEADERS });
@@ -106,18 +123,22 @@ const server = http.createServer(async (req, res) => {
           }
         }
       } catch (err) {
-        // Fallback failed
+        debug(`HTML scrape failed: ${err.message}`, { userid, appid: id });
       }
     }
 
     if (appName) {
       appNames.push(appName);
+    } else {
+      debug("Could not resolve name", { userid, appid: id });
     }
 
     if (i < wishlistIds.length - 1) {
       await new Promise((resolve) => setTimeout(resolve, 150));
     }
   }
+
+  debug(`Resolved ${appNames.length}/${wishlistIds.length} app names`, { userid });
 
   res.writeHead(200, { "Content-Type": "text/plain; charset=utf-8" });
   res.end(Buffer.from(appNames.join("\n"), "utf8"));
